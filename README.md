@@ -2,8 +2,9 @@
 
 use `timm` to run the WD Tagger V3 models.
 
-## How To Use
 ### Currently not working well on Colab nor Runpod. Also do not work with GPU.
+
+## How To Use
 
 1. clone the repository and enter the directory:
 ```sh
