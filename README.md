@@ -41,12 +41,7 @@ Example output from `python wdv3_timm.py swinv2 dataset`:
 Loading model 'swinv2' from 'SmilingWolf/wd-swinv2-tagger-v3'...
 Loading tag list...
 Creating data transform...
-Processing image: 0067f57972698ed0db8721c5f3240cb8.png
-Processing image: 009322c6122655d1ac93674865c49591.jpeg
-Processing image: 00a10cb3159cc078d347a9e74eb48114.jpeg
-Processing image: 00d7957e0e59254b5f7235faab50adf4.jpeg
-Processing image: 010d0d6b47aba7c7c8fbbcdd1f948049.jpeg
-Processing image: 010e3d98f91e5704548c3d76f5b82ba9.png
+100%|██████████████████████████████████████████████████████████████████████████| 1.04k/1.04k [10:46<00:00, 1.61image/s]
 Done!
 ```
 The script will create a new file `imagename.txt` containing the tags.
