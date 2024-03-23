@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-import threading
-import queue
-
 import numpy as np
 import pandas as pd
 import timm
@@ -224,26 +221,10 @@ def main(opts: ScriptOptions):
     total_images = sum(1 for _ in image_dir.rglob("*.*") if _.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"])
     pbar = tqdm(total=total_images, unit="image", unit_scale=True)  # Initialize the progress bar
 
-    image_queue = queue.Queue()
-    for i in range(opts.batch_size):
-        thread = threading.Thread(target=worker, args=(image_queue, model, labels, opts, transform, pbar))
-        thread.daemon = True
-        thread.start()
-
-    batch = []
     for image_path in image_dir.rglob("*.*"):
         if image_path.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]:
-            batch.append(image_path)
-            if len(batch) == opts.batch_size:
-                image_queue.put(batch)
-                batch = []
-
-    if batch:
-        image_queue.put(batch)
-
-    image_queue.join()
-    for i in range(opts.batch_size):
-        image_queue.put(None)
+            process_image(image_path, model, labels, opts, transform)
+            pbar.update(1)  # Update the progress bar
 
     pbar.close()  # Close the progress bar
     print("Done!")
