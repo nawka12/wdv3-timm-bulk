@@ -17,10 +17,9 @@ from torch.nn import functional as F
 torch_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_REPO_MAP = {
     "vit": "SmilingWolf/wd-vit-tagger-v3",
-    "swinv2": "SmilingWolf/wd-swinv2-tagger-v3",
     "convnext": "SmilingWolf/wd-convnext-tagger-v3",
+    "swinv2": "SmilingWolf/wd-swinv2-tagger-v3",
 }
-
 
 def pil_ensure_rgb(image: Image.Image) -> Image.Image:
     # convert to RGB/RGBA if not already (deals with palette images etc.)
@@ -111,20 +110,24 @@ def get_tags(
 
 @dataclass
 class ScriptOptions:
+    model: str = field(positional=True)  # Make the model name a positional argument
     image_file: Path = field(positional=True)
-    model: str = field(default="vit")
     gen_threshold: float = field(default=0.35)
     char_threshold: float = field(default=0.75)
 
-
 def main(opts: ScriptOptions):
+    if opts.model not in MODEL_REPO_MAP:
+        print(f"Available models: {list(MODEL_REPO_MAP.keys())}")
+        raise ValueError(f"Unknown model name '{opts.model}'")
+
     repo_id = MODEL_REPO_MAP.get(opts.model)
-    image_path = Path(opts.image_file).resolve()
-    if not image_path.is_file():
-        raise FileNotFoundError(f"Image file not found: {image_path}")
+    image_dir = Path(opts.image_file).resolve()
+    if not image_dir.is_dir():
+        raise NotADirectoryError(f"{image_dir} is not a directory")
 
     print(f"Loading model '{opts.model}' from '{repo_id}'...")
-    model: nn.Module = timm.list_pretrained("hf-hub:" + repo_id).eval()
+    model = timm.create_model("hf-hub:" + repo_id, pretrained=True)
+    model.eval()  # Set the model to evaluation mode
     state_dict = timm.models.load_state_dict_from_hf(repo_id)
     model.load_state_dict(state_dict)
 
@@ -134,70 +137,43 @@ def main(opts: ScriptOptions):
     print("Creating data transform...")
     transform = create_transform(**resolve_data_config(model.pretrained_cfg, model=model))
 
-    print("Loading image and preprocessing...")
-    # get image
-    img_input: Image.Image = Image.open(image_path)
-    # ensure image is RGB
-    img_input = pil_ensure_rgb(img_input)
-    # pad to square with white background
-    img_input = pil_pad_square(img_input)
-    # make it be BGR because OpenCV curses
-    img_input = img_input.convert("BGR;24")
-    # run the model's input transform to convert to tensor and rescale
-    inputs: Tensor = transform(img_input).unsqueeze(0)
-    # NCHW image RGB to BGR
-    inputs = inputs[:, [2, 1, 0]]
+    for image_path in image_dir.rglob("*.*"):
+        if image_path.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]:
+            print(f"Processing image: {image_path.name}")
+            try:
+                img_input: Image.Image = Image.open(image_path)
+                img_input = pil_ensure_rgb(img_input)
+                img_input = pil_pad_square(img_input)
+                img_input = img_input.convert("RGB")
+                inputs: Tensor = transform(img_input).unsqueeze(0)
+                inputs = inputs[:, [2, 1, 0]]
 
-    print("Running inference...")
-    with torch.inference_mode():
-        # move model to GPU, if available
-        if torch_device.type != "cpu":
-            model = model.to(torch_device)
-            inputs = inputs.to(torch_device)
-        # run the model
-        outputs = model.forward(inputs)
-        # apply the final activation function (timm doesn't support doing this internally)
-        outputs = F.sigmoid(outputs)
-        # move inputs, outputs, and model back to to cpu if we were on GPU
-        if torch_device.type != "cpu":
-            inputs = inputs.to("cpu")
-            outputs = outputs.to("cpu")
-            model = model.to("cpu")
+                with torch.inference_mode():
+                    if torch_device.type != "cpu":
+                        model = model.to(torch_device)
+                        inputs = inputs.to(torch_device)
+                    outputs = model.forward(inputs)
+                    outputs = F.sigmoid(outputs)
+                    if torch_device.type != "cpu":
+                        inputs = inputs.to("cpu")
+                        outputs = outputs.to("cpu")
+                        model = model.to("cpu")
 
-    print("Processing results...")
-    caption, taglist, ratings, character, general = get_tags(
-        probs=outputs.squeeze(0),
-        labels=labels,
-        gen_threshold=opts.gen_threshold,
-        char_threshold=opts.char_threshold,
-    )
+                caption, taglist, ratings, character, general = get_tags(
+                    probs=outputs.squeeze(0),
+                    labels=labels,
+                    gen_threshold=opts.gen_threshold,
+                    char_threshold=opts.char_threshold,
+                )
 
-    print("--------")
-    print(f"Caption: {caption}")
-    print("--------")
-    print(f"Tags: {taglist}")
+                with open(image_path.with_suffix(".txt"), "w", encoding="utf-8") as f:
+                    f.write(taglist)
 
-    print("--------")
-    print("Ratings:")
-    for k, v in ratings.items():
-        print(f"  {k}: {v:.3f}")
-
-    print("--------")
-    print(f"Character tags (threshold={opts.char_threshold}):")
-    for k, v in character.items():
-        print(f"  {k}: {v:.3f}")
-
-    print("--------")
-    print(f"General tags (threshold={opts.gen_threshold}):")
-    for k, v in general.items():
-        print(f"  {k}: {v:.3f}")
+            except Exception as e:
+                print(f"Error processing {image_path.name}: {e}")
 
     print("Done!")
 
-
 if __name__ == "__main__":
     opts, _ = parse_known_args(ScriptOptions)
-    if opts.model not in MODEL_REPO_MAP:
-        print(f"Available models: {list(MODEL_REPO_MAP.keys())}")
-        raise ValueError(f"Unknown model name '{opts.model}'")
     main(opts)
