@@ -17,7 +17,11 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from tqdm import tqdm  # Import the tqdm library
 
-torch_device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using " + device.type)
+if device.type == "cpu":
+    print("Warning: Running the script on CPU. The process will be very slow compared to running on a GPU.")
+
 MODEL_REPO_MAP = {
     "vit": "SmilingWolf/wd-vit-tagger-v3",
     "convnext": "SmilingWolf/wd-convnext-tagger-v3",
@@ -120,6 +124,8 @@ class ScriptOptions:
     batch_size: int = field(default=8)
 
 def worker(image_queue, model, labels, opts, transform, pbar):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     while True:
         image_paths = image_queue.get()
         if image_paths is None:
@@ -141,15 +147,10 @@ def worker(image_queue, model, labels, opts, transform, pbar):
             inputs = inputs[:, [2, 1, 0]]
 
             with torch.inference_mode():
-                if torch_device.type != "cpu":
-                    model = model.to(torch_device)
-                    inputs = inputs.to(torch_device)
-                outputs = model.forward(inputs)
+                inputs = inputs.to(device)  # Move inputs to GPU
+                outputs = model(inputs)
                 outputs = F.sigmoid(outputs)
-                if torch_device.type != "cpu":
-                    inputs = inputs.to("cpu")
-                    outputs = outputs.to("cpu")
-                    model = model.to("cpu")
+                outputs = outputs.cpu()  # Move outputs back to CPU
 
             for i, image_path in enumerate(image_paths):
                 caption, taglist, ratings, character, general = get_tags(
@@ -167,6 +168,8 @@ def worker(image_queue, model, labels, opts, transform, pbar):
         image_queue.task_done()
 
 def process_image(image_path, model, labels, opts, transform):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     try:
         img_input: Image.Image = Image.open(image_path)
         img_input = pil_ensure_rgb(img_input)
@@ -176,15 +179,10 @@ def process_image(image_path, model, labels, opts, transform):
         inputs = inputs[:, [2, 1, 0]]
 
         with torch.inference_mode():
-            if torch_device.type != "cpu":
-                model = model.to(torch_device)
-                inputs = inputs.to(torch_device)
-            outputs = model.forward(inputs)
+            inputs = inputs.to(device)
+            outputs = model(inputs)
             outputs = F.sigmoid(outputs)
-            if torch_device.type != "cpu":
-                inputs = inputs.to("cpu")
-                outputs = outputs.to("cpu")
-                model = model.to("cpu")
+            outputs = outputs.cpu()
 
         caption, taglist, ratings, character, general = get_tags(
             probs=outputs.squeeze(0),
@@ -214,6 +212,9 @@ def main(opts: ScriptOptions):
     model.eval()  # Set the model to evaluation mode
     state_dict = timm.models.load_state_dict_from_hf(repo_id)
     model.load_state_dict(state_dict)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)  # Move the model to GPU/CPU
 
     print("Loading tag list...")
     labels: LabelData = load_labels_hf(repo_id=repo_id)
