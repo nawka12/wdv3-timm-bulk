@@ -23,6 +23,8 @@ if device.type == "cpu":
     print("Warning: Running the script on CPU. The process will be very slow compared to running on a GPU.")
 
 MODEL_REPO_MAP = {
+    "eva02": "SmilingWolf/wd-eva02-large-tagger-v3",
+    "vit-large": "SmilingWolf/wd-vit-large-tagger-v3",
     "vit": "SmilingWolf/wd-vit-tagger-v3",
     "convnext": "SmilingWolf/wd-convnext-tagger-v3",
     "swinv2": "SmilingWolf/wd-swinv2-tagger-v3",
